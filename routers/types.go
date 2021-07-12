@@ -9,6 +9,7 @@ import (
 // Router helps link http.Request.s and an OpenAPIv3 spec
 type Router interface {
 	FindRoute(req *http.Request) (route *Route, pathParams map[string]string, err error)
+	http.Handler
 }
 
 // Route describes the operation an http.Request can match

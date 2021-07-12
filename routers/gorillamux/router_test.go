@@ -2,12 +2,16 @@ package gorillamux
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"sort"
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/routers"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -128,7 +132,7 @@ func TestRouter(t *testing.T) {
 
 	err := doc.Validate(context.Background())
 	require.NoError(t, err)
-	r, err := NewRouter(doc)
+	r, err := NewRouter(doc, nil)
 	require.NoError(t, err)
 
 	expect(r, http.MethodGet, "/not_existing", nil, nil)
@@ -166,7 +170,7 @@ func TestRouter(t *testing.T) {
 	}
 	err = doc.Validate(context.Background())
 	require.NoError(t, err)
-	r, err = NewRouter(doc)
+	r, err = NewRouter(doc, nil)
 	require.NoError(t, err)
 	expect(r, http.MethodGet, "/hello", nil, nil)
 	expect(r, http.MethodGet, "/api/v1/hello", nil, nil)
@@ -205,4 +209,109 @@ func TestPermuteScheme(t *testing.T) {
 	require.NoError(t, err)
 	perms := permutePart(scheme0, server)
 	require.Equal(t, []string{"http", "https"}, perms)
+}
+
+func testDocAndHandlers() (*openapi3.T, map[*openapi3.Operation]http.Handler) {
+	helloCONNECT := &openapi3.Operation{Responses: openapi3.NewResponses()}
+	helloDELETE := &openapi3.Operation{Responses: openapi3.NewResponses()}
+	helloGET := &openapi3.Operation{Responses: openapi3.NewResponses()}
+	helloHEAD := &openapi3.Operation{Responses: openapi3.NewResponses()}
+	// paramsGET := &openapi3.Operation{Responses: openapi3.NewResponses()}
+	// booksPOST := &openapi3.Operation{Responses: openapi3.NewResponses()}
+	partialGET := &openapi3.Operation{Responses: openapi3.NewResponses()}
+	doc := openapi3.T{
+		OpenAPI: "3.0.0",
+		Info: &openapi3.Info{
+			Title:   "MyAPI",
+			Version: "0.1",
+		},
+		Paths: openapi3.Paths{
+			"/hello": &openapi3.PathItem{
+				Connect: helloCONNECT,
+				Delete:  helloDELETE,
+				Head:    helloHEAD,
+			},
+			"/onlyGET": &openapi3.PathItem{
+				Get: helloGET,
+			},
+			// "/params/{x}/{y}/{z:.*}": &openapi3.PathItem{
+			// 	Get: paramsGET,
+			// 	Parameters: openapi3.Parameters{
+			// 		&openapi3.ParameterRef{Value: openapi3.NewPathParameter("x")},
+			// 		&openapi3.ParameterRef{Value: openapi3.NewPathParameter("y")},
+			// 		&openapi3.ParameterRef{Value: openapi3.NewPathParameter("z")},
+			// 	},
+			// },
+			// "/books/{bookid}": &openapi3.PathItem{
+			// 	Get: paramsGET,
+			// 	Parameters: openapi3.Parameters{
+			// 		&openapi3.ParameterRef{Value: openapi3.NewPathParameter("bookid")},
+			// 	},
+			// },
+			// "/books/{bookid2}.json": &openapi3.PathItem{
+			// 	Post: booksPOST,
+			// 	Parameters: openapi3.Parameters{
+			// 		&openapi3.ParameterRef{Value: openapi3.NewPathParameter("bookid2")},
+			// 	},
+			// },
+			"/partial": &openapi3.PathItem{
+				Get: partialGET,
+			},
+		},
+	}
+
+	onlyGETHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "hello from only GET handler")
+	})
+	partialGETHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "hello from partial GET handler")
+	})
+	helloHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "hello from hello handler [%s]", r.Method)
+	})
+
+	handlers := map[*openapi3.Operation]http.Handler{
+		helloGET:     onlyGETHandler,
+		partialGET:   partialGETHandler,
+		helloCONNECT: helloHandler,
+		helloHEAD:    helloHandler,
+		helloDELETE:  helloHandler,
+	}
+
+	return &doc, handlers
+}
+
+func TestHandler(t *testing.T) {
+	doc, handlers := testDocAndHandlers()
+	router, err := NewRouter(doc, handlers)
+	require.NoError(t, err)
+
+	srv := httptest.NewServer(router)
+	defer srv.Close()
+
+	t.Run("onlyGET", func(t *testing.T) {
+		res, err := http.Get(srv.URL + "/onlyGET")
+		require.NoError(t, err)
+
+		greeting, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, res.StatusCode)
+
+		t.Log(res.Status)
+		t.Log(string(greeting))
+	})
+
+	t.Run("partial", func(t *testing.T) {
+		res, err := http.Get(srv.URL + "/partial")
+		require.NoError(t, err)
+
+		greeting, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, res.StatusCode)
+
+		t.Log(res.Status)
+		t.Log(string(greeting))
+	})
 }

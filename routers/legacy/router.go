@@ -162,3 +162,5 @@ func (router *Router) FindRoute(req *http.Request) (*routers.Route, map[string]s
 	}
 	return route, pathParams, nil
 }
+
+func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {}

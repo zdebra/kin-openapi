@@ -7,6 +7,7 @@
 package gorillamux
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -19,6 +20,7 @@ import (
 
 // Router helps link http.Request.s and an OpenAPIv3 spec
 type Router struct {
+	*mux.Router
 	muxes  []*mux.Route
 	routes []*routers.Route
 }
@@ -26,7 +28,7 @@ type Router struct {
 // NewRouter creates a gorilla/mux router.
 // Assumes spec is .Validate()d
 // TODO: Handle/HandlerFunc + ServeHTTP (When there is a match, the route variables can be retrieved calling mux.Vars(request))
-func NewRouter(doc *openapi3.T) (routers.Router, error) {
+func NewRouter(doc *openapi3.T, handlers map[*openapi3.Operation]http.Handler) (routers.Router, error) {
 	type srv struct {
 		schemes    []string
 		host, base string
@@ -56,8 +58,7 @@ func NewRouter(doc *openapi3.T) (routers.Router, error) {
 	if len(servers) == 0 {
 		servers = append(servers, srv{})
 	}
-	muxRouter := mux.NewRouter() /*.UseEncodedPath()?*/
-	r := &Router{}
+	r := &Router{Router: mux.NewRouter()}
 	for _, path := range orderedPaths(doc.Paths) {
 		pathItem := doc.Paths[path]
 
@@ -69,25 +70,37 @@ func NewRouter(doc *openapi3.T) (routers.Router, error) {
 		sort.Strings(methods)
 
 		for _, s := range servers {
-			muxRoute := muxRouter.Path(s.base + path).Methods(methods...)
-			if schemes := s.schemes; len(schemes) != 0 {
-				muxRoute.Schemes(schemes...)
+
+			// add mux route for each open api operation
+			for method, op := range operations {
+				muxRoute := r.Path(s.base + path).Methods(methods...)
+
+				handler, found := handlers[op]
+				if !found {
+					return nil, fmt.Errorf("matching handler for %s %v not found", method, op)
+				}
+				muxRoute.Handler(handler)
+
+				if schemes := s.schemes; len(schemes) != 0 {
+					muxRoute.Schemes(schemes...)
+				}
+				if host := s.host; host != "" {
+					muxRoute.Host(host)
+				}
+				if err := muxRoute.GetError(); err != nil {
+					return nil, err
+				}
+
+				r.muxes = append(r.muxes, muxRoute)
+				r.routes = append(r.routes, &routers.Route{
+					Spec:      doc,
+					Server:    s.server,
+					Path:      path,
+					PathItem:  pathItem,
+					Method:    "",
+					Operation: nil,
+				})
 			}
-			if host := s.host; host != "" {
-				muxRoute.Host(host)
-			}
-			if err := muxRoute.GetError(); err != nil {
-				return nil, err
-			}
-			r.muxes = append(r.muxes, muxRoute)
-			r.routes = append(r.routes, &routers.Route{
-				Spec:      doc,
-				Server:    s.server,
-				Path:      path,
-				PathItem:  pathItem,
-				Method:    "",
-				Operation: nil,
-			})
 		}
 	}
 	return r, nil
