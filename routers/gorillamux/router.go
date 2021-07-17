@@ -7,7 +7,6 @@
 package gorillamux
 
 import (
-	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -28,7 +27,11 @@ type Router struct {
 // NewRouter creates a gorilla/mux router.
 // Assumes spec is .Validate()d
 // TODO: Handle/HandlerFunc + ServeHTTP (When there is a match, the route variables can be retrieved calling mux.Vars(request))
-func NewRouter(doc *openapi3.T, handlers map[*openapi3.Operation]http.Handler) (routers.Router, error) {
+func NewRouter(doc *openapi3.T) (routers.Router, error) {
+	return NewRouterWithHandlers(doc, map[*openapi3.Operation]http.Handler{})
+}
+
+func NewRouterWithHandlers(doc *openapi3.T, handlers map[*openapi3.Operation]http.Handler) (routers.Router, error) {
 	type srv struct {
 		schemes    []string
 		host, base string
@@ -76,10 +79,9 @@ func NewRouter(doc *openapi3.T, handlers map[*openapi3.Operation]http.Handler) (
 				muxRoute := r.Path(s.base + path).Methods(methods...)
 
 				handler, found := handlers[op]
-				if !found {
-					return nil, fmt.Errorf("matching handler for %s %v not found", method, op)
+				if found {
+					muxRoute.Handler(handler)
 				}
-				muxRoute.Handler(handler)
 
 				if schemes := s.schemes; len(schemes) != 0 {
 					muxRoute.Schemes(schemes...)
@@ -97,8 +99,8 @@ func NewRouter(doc *openapi3.T, handlers map[*openapi3.Operation]http.Handler) (
 					Server:    s.server,
 					Path:      path,
 					PathItem:  pathItem,
-					Method:    "",
-					Operation: nil,
+					Method:    method,
+					Operation: op,
 				})
 			}
 		}

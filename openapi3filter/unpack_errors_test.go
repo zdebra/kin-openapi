@@ -18,7 +18,7 @@ func Example() {
 		panic(err)
 	}
 
-	router, err := gorillamux.NewRouter(doc, nil)
+	router, err := gorillamux.NewRouter(doc)
 	if err != nil {
 		panic(err)
 	}

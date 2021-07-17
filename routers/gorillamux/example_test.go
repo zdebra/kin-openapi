@@ -20,7 +20,7 @@ func Example() {
 	if err = doc.Validate(ctx); err != nil {
 		panic(err)
 	}
-	router, err := gorillamux.NewRouter(doc, nil)
+	router, err := gorillamux.NewRouter(doc)
 	if err != nil {
 		panic(err)
 	}
